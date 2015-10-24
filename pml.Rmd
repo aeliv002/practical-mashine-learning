@@ -1,0 +1,497 @@
+---
+title: "Practical mashine learning course project"
+author: "Kristijonas Impolevičius"
+date: "10/10/2015"
+output: html_document
+---
+
+```{r,echo=FALSE,warning=FALSE, message=FALSE}
+library(dplyr)
+library(MASS)
+library(caret)
+library(klaR)
+library(reshape2)
+library(GGally)
+library(randomForest)
+library(gbm)
+library(knitr)
+library(xtable)
+
+poly.degree = 10 
+```
+
+
+# Problem formulation
+## introduction
+
+We have data from accelerometers. We will try create model which will predict the manner participants did their exersises.
+
+## Mashine learning model
+
+Ok so we have a supervised learning and multi-clasification problem. We want to predict the classe (quality value). 
+
+## Data preparation for machine learning
+
+Data is taken from this link 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'.
+
+### Data import step 
+
+Data import step is not included here but you can view it in .RMD file.
+```{r echo=FALSE, cache=TRUE}
+table.raw <- read.table(
+    "../data/pml-training.csv", 
+    sep=",",
+    na.strings = "NA",
+    header = TRUE) 
+```
+
+### Data structure 
+
+Data is a table with `r dim(table.raw)[2]` columns and `r dim(table.raw)[1]` rows.
+Data has windows, which are like accelerator observation session. Each session has a summary line. When session ends, summary columns are calculated and added. This is new_window == "yes".
+
+### Columns discarded
+The data has some columns which are not needed. They are just details of experiment, but not the observation of the accelerator. So there'is X (which is just a primary_key ), user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window.
+
+There are summary columns calculated at each session end. Summary columns are not interesting to our prediction vector, so these summary columns are also discarded. Summary columns has extention like '_total', '_max', '_min' and so on.
+
+Data cleaning step is not included here, but you can view in in .RMD file.
+```{r echo=FALSE, cache=TRUE}
+index1 <- grepl("^max", names(table.raw))
+index2 <- grepl("^min", names(table.raw))
+index3 <- grepl("^kurtosis", names(table.raw))
+index4 <- grepl("^skewness", names(table.raw))
+index5 <- grepl("^amplitude", names(table.raw))
+index6 <- grepl("^var", names(table.raw))
+index7 <- grepl("^avg", names(table.raw))
+index8 <- grepl("^stddev", names(table.raw))
+index9 <- grepl("^total", names(table.raw))
+index10 <- grepl("*_window", names(table.raw))
+index11 <- grepl("*timestamp*", names(table.raw))
+index12 <- c(1,2)
+
+namesIndex <- c(
+    names(table.raw)[index1],
+    names(table.raw)[index2],
+    names(table.raw)[index3],
+    names(table.raw)[index4],
+    names(table.raw)[index5],
+    names(table.raw)[index6],
+    names(table.raw)[index7],
+    names(table.raw)[index8],
+    names(table.raw)[index9],
+    names(table.raw)[index10],
+    names(table.raw)[index11],
+    names(table.raw)[index12]
+    )
+
+neededColNames <- setdiff(names(table.raw),namesIndex)
+
+# neededColNamesTest <- setdiff(
+#     neededColNames,
+#     setdiff(
+#         names(table.raw),
+#         names(testTable.raw))
+#     )
+
+# testIL <- as.data.frame (cbind(diagnosis = testing[,1],testing[,grepl("^IL", names(testing))]))
+
+table.cleaned <- table.raw[,neededColNames]
+
+
+```
+
+After cleaning data we have `r dim(table.cleaned)[2]` columns. `r {dim(table.raw)[2] - 1}` columns of observation vector (X), and one classe (Y) column.
+
+### Extending Data
+
+This study will update data by creating new columns, which will be polynomial. In this study every column (exept classe) will be updated up to degree of `r poly.degree`. 
+
+Here is code for doing that.
+
+```{r,echo=TRUE, cache=TRUE}
+poly.degree = 10 
+
+table.poly <- as.data.frame(t(apply(table.cleaned[,c(-49)],1,poly,degree=poly.degree,raw=TRUE)))
+names.of.poly <- names(table.cleaned[,c(-49)])
+for(i in 2:poly.degree){
+    names.of.poly <- c(names.of.poly,paste(names(table.cleaned[,c(-49)]),"_d",i,sep = ""))
+}
+names(table.poly) <- names.of.poly
+table.poly <- cbind(table.poly,classe=table.cleaned$classe)
+```
+
+Now data has `r dim(table.poly)[2]` columns.
+
+## Machine learning
+
+### Model selection
+
+It is multi-classification problem. And this report will try to fit model. We'll fit model of various degrees. In this study linear models and non linear models will be tryed.  
+This report will investigate which model will be best for prediction. 
+
+### Which models will be considered
+
+These models will be considered. 
+Linear models  
+  1. Linear discriminant analysis (LDA) with polynomial features 1-10.  
+  2. Quadratic discriminant analysis (QDA) with polynomial features 1-3.  
+Non linear models  
+  3. Random forest  
+  4. Boosting  
+
+### Choosing the best model
+
+For each model we'll measuse accuracy for validation set. The best model will be which accuracy will be highest for validation set. If model accuracy will be about the same we will choose model which requires less training time. 
+
+### How all this will work
+
+Fore every model we'll do these steps:  
+1. train table.poly table  
+2. calculate confusion matrix for training data  
+3. calculate confusion matrix for validation set  
+4. Draw some plots if model has tuning paramaters  
+5. Come with inferences  
+
+### Set seed
+
+For reproducibility we set seed 2222.
+```{r}
+set.seed(2222)
+```
+
+### Train and validation sets
+
+We split our data to validation set and training set. The test set is given and this study will try to predict given test data.
+In this study 75% of data will be for training and 25% for validation.
+
+```{r, cache=TRUE}
+sample.size = round(.75*dim(table.poly)[1])
+train.sample = sample(dim(table.poly)[1],sample.size)
+
+indexes <- seq(1:dim(table.poly)[1])
+indexTrue <- indexes %in% train.sample
+
+train.table <- table.poly[indexTrue,]
+validation.table <- table.poly[!indexTrue,]
+```
+
+## Linear discriminant analysis 
+
+So we'll do LDA with various polynomial degrees. 
+Here is code which does trains data with various degrees.
+
+```{r, cache=TRUE,warning=FALSE}
+list.lda.models = list()
+list.lda.models.CM.train = list()
+list.lda.models.CM.validation = list()
+for ( i in 1:poly.degree){
+    
+    list.lda.models[[i]] <- lda(
+        classe~., 
+        dplyr::select(train.table,c(1:{48*i},{48*poly.degree+1}))
+    )
+
+    prediction.1.train <- predict(list.lda.models[[i]],newdata=train.table)
+    prediction.1.validation <- predict(list.lda.models[[i]],newdata=validation.table)
+    
+    list.lda.models.CM.train[[i]] <- confusionMatrix(
+        prediction.1.train$class,train.table$classe)
+    list.lda.models.CM.validation[[i]] <- confusionMatrix(
+        prediction.1.validation$class,validation.table$classe)
+
+}
+```
+  
+```{r,cache=TRUE,echo=FALSE}
+accuracy.LDA <- data.frame(class = "train", degree = 1,value=list.lda.models.CM.train[[1]]$overall[1])
+for (i in 2:poly.degree){
+    accuracy.LDA <- rbind(accuracy.LDA,{data.frame(class = "train",degree = i,value=list.lda.models.CM.train[[i]]$overall[1])})
+}
+for (i in 1:poly.degree){
+    accuracy.LDA <- rbind(accuracy.LDA,{data.frame(class = "validation",degree = i,value=list.lda.models.CM.validation[[i]]$overall[1])})
+}
+``` 
+
+Here is misclassification error for various degrees for training and validation tables.
+```{r,echo=FALSE, results="asis", message=FALSE}
+
+kable(dcast(accuracy.LDA,degree ~ class),format = "pandoc", digits = 3,caption = "Accuracy",align = "l")
+
+``` 
+
+We see that more degree gives us more accuraccy.
+
+And draw graph. for that error
+
+```{r,echo=FALSE,cache=TRUE}
+
+p1 <- ggplot(data = accuracy.LDA,aes(x = degree,y =  (1 - value), color = class),) +
+    geom_line(size = 1) + 
+    xlab("poly degree") + 
+    ylab("Misclassification error") +
+    ylim(0,0.35)+ 
+    scale_x_continuous(breaks=1:10) + 
+    theme(legend.title = element_blank())
+
+
+print(p1)
+
+
+```
+
+### LDA conclusions
+
+Here is final model on LDA. We see that as we get more degree, the model better fits. And even from validation error the more degrees do not lead to overfitting. We managed to achieve misclassification error less than 0.1, but we'll see later, that better results can be achieved. 
+
+Here are results for level 10 degree model.
+
+```{r,echo=FALSE, results="asis", message=FALSE}
+kable(t(list.lda.models.CM.validation[[10]]$overall),format = "pandoc",digits=3,caption="Metrix",align = "l") 
+
+kable(list.lda.models.CM.validation[[10]]$table,format = "pandoc",digits=3, caption = "Confusion matrix")
+```
+
+
+## Quadratic discriminant analysis
+
+This is the same situation like LDA. But it creates model only until degree 3. Later it gives some R errors. So we'll train only 3 models and compare which is best.
+Here is code to train these 3 models.
+
+```{r, cache=TRUE}
+
+list.qda.models = list()
+list.qda.models.CM.train = list()
+list.qda.models.CM.validation = list()
+for ( i in 1:poly.degree){
+    try(
+        {
+        list.qda.models[[i]] <- qda(
+            classe~.,
+            dplyr::select(train.table,c(1:{48*i},{48*poly.degree+1}))
+        )
+    
+        prediction.train <- predict(list.qda.models[[i]],newdata=train.table)
+        prediction.validation <- predict(list.qda.models[[i]],newdata=validation.table)
+        
+        list.qda.models.CM.train[[i]] <- confusionMatrix(
+            prediction.train$class,
+            train.table$classe)
+        list.qda.models.CM.validation[[i]] <- confusionMatrix(
+            prediction.validation$class,
+            validation.table$classe)
+        }
+    )
+}
+
+```
+
+
+
+```{r,cache=TRUE,echo=FALSE}
+
+accuracy.QDA <- data.frame(class = "train", degree = 1,value=list.qda.models.CM.train[[1]]$overall[1])
+for (i in 2:3){
+    accuracy.QDA <- rbind(accuracy.QDA,{data.frame(class = "train",degree = i,value=list.qda.models.CM.train[[i]]$overall[1])})
+}
+for (i in 1:3){
+    accuracy.QDA <- rbind(accuracy.QDA,{data.frame(class = "validation",degree = i,value=list.qda.models.CM.validation[[i]]$overall[1])})
+}
+```
+
+Here is misclassification error for various degrees for training and validation tables.
+
+```{r,echo=FALSE, results="asis", message=FALSE}
+
+kable(dcast(accuracy.QDA,degree ~ class),format = "pandoc", digits = 3,caption = "Accuracy",align = "l")
+
+``` 
+
+Here is graph representing the misclasification error.
+
+```{r, echo=FALSE}
+p2 <- ggplot(data = accuracy.QDA,aes(x = degree,y =  (1 - value), color = class),) +
+    geom_line(size = 1) + 
+    xlab("poly degree") + 
+    ylab("misclassification error") +
+    ylim(0,0.15)+ 
+    scale_x_continuous(breaks=1:3) + 
+    theme(legend.title = element_blank())
+
+print(p2)
+
+```
+
+
+### QDA conclusions
+
+Misclassification error shows that for given data QDA models are much better than LDA models. And as we lift our model to degree 3 this study get very good results for validation. 
+From validation error it shown that more degrees does not lead to overfitting. 
+Here we managed to achieve misclassification error less than 0.5, but this study shows that even better results can be achieved with non-linear models.
+
+```{r,echo=FALSE, results="asis", message=FALSE}
+kable(t(list.qda.models.CM.validation[[3]]$overall),format = "pandoc",digits=3,caption="Metrix",align = "l") 
+
+kable(list.qda.models.CM.validation[[3]]$table,format = "pandoc",digits=3, caption = "Confusion matrix")
+```
+
+## Random forest
+
+So now we go to nonlienar models. Firt will be Random forest. 
+
+Here is code for training Random forest.
+
+```{r,cache=TRUE}
+rf.model <- randomForest(
+    classe ~ ., 
+    mtry = 10, 
+    data = dplyr::select(train.table,c(1:48,{48*poly.degree+1})) )
+
+prediction.rf.train <- predict(rf.model,newdata=train.table)
+prediction.rf.validation <- predict(rf.model,newdata=validation.table)
+
+rf.model.CM.train <- confusionMatrix(prediction.rf.train,train.table$classe)
+rf.model.CM.validation <- confusionMatrix(prediction.rf.validation,validation.table$classe)
+
+```
+
+### Random forest results 
+
+As we see for training table it fits data almost perfectly. This could lead us to overfitting.
+```{r,echo=FALSE, results="asis", message=FALSE}
+kable(t(rf.model.CM.validation$overall),format = "pandoc",digits=3,caption="Metrix for training",align = "l") 
+kable(rf.model.CM.train$table,format = "pandoc",digits=3, caption = "Confusion matrix")
+```
+
+Misclasfication error for vaidation set is small, so our model is good. 
+
+```{r,echo=FALSE, results="asis", message=FALSE}
+kable(t(rf.model.CM.validation$overall),format = "pandoc",digits=3,caption="Metrix for validation",align = "l") 
+kable(rf.model.CM.validation$table,format = "pandoc",digits=3, caption = "Confusion matrix")
+```
+
+### Importance of variables
+
+Importance of variables for classification using random forest.
+We'll present them graphically. And show only 20 important vars.
+
+```{r,echo=FALSE}
+varImpPlot(rf.model,sort = TRUE,n.var = 20, main = "variable importance")
+```
+
+### Random forest conclusions
+
+Random forest is much more better for predicting and out comes the linear models.
+
+### Boost model
+
+Another non-linear model. We'll see how it fits
+For this model tunning parameters here is n.trees = 500.
+
+Here is model and predictions for that method.
+```{r,cache=TRUE,warning=FALSE}
+boost.model <- gbm(classe ~ .,
+                   data = dplyr::select(train.table,c(1:{48},{91},{48*poly.degree+1})) ,
+                   distribution="multinomial",
+                   n.trees = 1000,
+                   shrinkage = 0.01,
+                   interaction.depth = 4,
+                )
+
+prediction.boost.train <- predict(boost.model,newdata=train.table,n.trees = 2000, type="response")
+prediction.boost.train.nr <- data.frame(classNr = apply(prediction.boost.train, 1, which.max))
+prediction.boost.train.class <- prediction.boost.train.nr %>% 
+    dplyr::mutate(
+        classe=ifelse(
+                classNr==1, 
+                "A",
+                ifelse(
+                    classNr==2,
+                    "B",
+                    ifelse(
+                        classNr==3, 
+                        "C",
+                        ifelse(
+                            classNr==4, 
+                            "D",
+                            "E")
+                    )
+                )
+            )                           
+        )
+
+
+prediction.boost.validation <- predict(
+    boost.model,newdata=validation.table,
+    n.trees = 1000, type="response")
+prediction.boost.validation.nr <- data.frame(classNr = apply(prediction.boost.validation, 1, which.max))
+prediction.boost.validation.class <- prediction.boost.validation.nr %>% 
+    dplyr::mutate(
+        classe=ifelse(
+            classNr==1, 
+            "A",
+            ifelse(
+                classNr==2,
+                "B",
+                ifelse(
+                    classNr==3, 
+                    "C",
+                    ifelse(
+                        classNr==4, 
+                        "D",
+                        "E")
+                )
+            )
+        )                           
+    )
+
+
+
+boost.model.CM.train <- confusionMatrix(
+    prediction.boost.train.class$classe,
+    train.table$classe)
+
+boost.model.CM.validation <- confusionMatrix(
+    prediction.boost.validation.class$classe,
+    validation.table$classe)
+
+
+```
+
+### Boost method results
+Here we have misclassification error for training.
+```{r,echo=FALSE, results="asis", message=FALSE}
+
+kable(t(boost.model.CM.train$overall),format = "pandoc",digits=3,caption="Metrix for validation",align = "l") 
+kable(boost.model.CM.train$table,format = "pandoc",digits=3, caption = "Confusion matrix")
+
+```
+
+It looks like this study get very good results for training and this could lead to overfitting.
+But for validation set this study gets also a very good result. 
+
+```{r,echo=FALSE, results="asis", message=FALSE}
+
+kable(t(boost.model.CM.validation$overall),format = "pandoc",digits=3,caption="Metrix for validation",align = "l") 
+kable(boost.model.CM.validation$table,format = "pandoc",digits=3, caption = "Confusion matrix")
+
+```
+
+
+### Boost inference
+
+So we have here inference, which variables are mostly influencial
+```{r,echo=FALSE, results="asis", message=FALSE}
+boost.most.influencial <-  summary.gbm(boost.model,plotit=FALSE)
+kable(head(boost.most.influencial,20),
+      format = "pandoc",
+      digits=3, 
+      caption = "Confusion matrix",
+      row.names = FALSE,align = "l")
+```
+
+## Conclusion 
+
+This study tried to show various mashine learning methods. It looks like, that for this data non linear models are much competitive than linear. Also it can be extend with more models not covered in this study like Regularized Discriminant Analysis or neural network. 
+For this data this study recomends using Random forest because train time is much better than Boost.
+
