@@ -24,11 +24,12 @@ poly.degree = 10
 # Problem formulation
 ## introduction
 
-We have data from accelerometers. We will try create model which will predict the manner participants did their exersises.
+Data is from accelerometers. We will try create model which will predict the manner participants did their exersises.
 
-## Mashine learning model
+## Model selection
 
-Ok so we have a supervised learning and multi-clasification problem. We want to predict the classe (quality value). 
+Here the task is to predict the classe (quality value).  
+So this is a supervised learning and multi-clasification problem. 
 
 ## Data preparation for machine learning
 
@@ -48,10 +49,10 @@ table.raw <- read.table(
 ### Data structure 
 
 Data is a table with `r dim(table.raw)[2]` columns and `r dim(table.raw)[1]` rows.
-Data has windows, which are like accelerator observation session. Each session has a summary line. When session ends, summary columns are calculated and added. This is new_window == "yes".
+Data is separated into windows. Each window is accelerator observation session. Each session has a summary line. When session (window) ends, summary columns are calculated and added. This is new_window == "yes" row in data frame.
 
 ### Columns discarded
-The data has some columns which are not needed. They are just details of experiment, but not the observation of the accelerator. So there'is X (which is just a primary_key ), user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window.
+The data has some columns which are not needed. They are just details of experiment, but not the observation of the accelerator. So there is X (which is just a primary_key ), user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window.
 
 There are summary columns calculated at each session end. Summary columns are not interesting to our prediction vector, so these summary columns are also discarded. Summary columns has extention like '_total', '_max', '_min' and so on.
 
@@ -86,15 +87,6 @@ namesIndex <- c(
     )
 
 neededColNames <- setdiff(names(table.raw),namesIndex)
-
-# neededColNamesTest <- setdiff(
-#     neededColNames,
-#     setdiff(
-#         names(table.raw),
-#         names(testTable.raw))
-#     )
-
-# testIL <- as.data.frame (cbind(diagnosis = testing[,1],testing[,grepl("^IL", names(testing))]))
 
 table.cleaned <- table.raw[,neededColNames]
 
@@ -146,12 +138,11 @@ For each model we'll measuse accuracy for validation set. The best model will be
 
 ### How all this will work
 
-Fore every model we'll do these steps:  
-1. train table.poly table  
+Fore every model this study will do steps:  
+1. train model with table.poly table  
 2. calculate confusion matrix for training data  
 3. calculate confusion matrix for validation set  
-4. Draw some plots if model has tuning paramaters  
-5. Come with inferences  
+4. Come with inferences  
 
 ### Set seed
 
@@ -178,9 +169,8 @@ validation.table <- table.poly[!indexTrue,]
 
 ## Linear discriminant analysis 
 
-So we'll do LDA with various polynomial degrees. 
-Here is code which does trains data with various degrees.
-
+This study will do LDA models with various polynomial degrees and will investigate which degree is best.
+Here is code which trains data with various degrees.  
 ```{r, cache=TRUE,warning=FALSE}
 list.lda.models = list()
 list.lda.models.CM.train = list()
@@ -220,9 +210,9 @@ kable(dcast(accuracy.LDA,degree ~ class),format = "pandoc", digits = 3,caption =
 
 ``` 
 
-We see that more degree gives us more accuraccy.
+We see that more degree gives us more accuraccy.  
 
-And draw graph. for that error
+Here is graph showing misclassification error for train and validation data.
 
 ```{r,echo=FALSE,cache=TRUE}
 
@@ -242,10 +232,10 @@ print(p1)
 
 ### LDA conclusions
 
-Here is final model on LDA. We see that as we get more degree, the model better fits. And even from validation error the more degrees do not lead to overfitting. We managed to achieve misclassification error less than 0.1, but we'll see later, that better results can be achieved. 
+Here is final model on LDA. This report shows that if more degree are introduced, the model better fits.  
+And even from validation error the more degrees do not lead to overfitting. This study managed to achieve misclassification error less than 0.1, but this report will show, that better results can be achieved.  
 
-Here are results for level 10 degree model.
-
+Here are results for level 10 degree model.  
 ```{r,echo=FALSE, results="asis", message=FALSE}
 kable(t(list.lda.models.CM.validation[[10]]$overall),format = "pandoc",digits=3,caption="Metrix",align = "l") 
 
@@ -263,7 +253,7 @@ Here is code to train these 3 models.
 list.qda.models = list()
 list.qda.models.CM.train = list()
 list.qda.models.CM.validation = list()
-for ( i in 1:poly.degree){
+for ( i in 1:3){
     try(
         {
         list.qda.models[[i]] <- qda(
@@ -337,9 +327,9 @@ kable(list.qda.models.CM.validation[[3]]$table,format = "pandoc",digits=3, capti
 
 ## Random forest
 
-So now we go to nonlienar models. Firt will be Random forest. 
+This study goes to nonlienar models. First Random forest will be tried. 
 
-Here is code for training Random forest.
+Here is code for training data with Random forest.
 
 ```{r,cache=TRUE}
 rf.model <- randomForest(
@@ -363,7 +353,7 @@ kable(t(rf.model.CM.validation$overall),format = "pandoc",digits=3,caption="Metr
 kable(rf.model.CM.train$table,format = "pandoc",digits=3, caption = "Confusion matrix")
 ```
 
-Misclasfication error for vaidation set is small, so our model is good. 
+Misclasfication error for vaidation set is small, so Random forest model is good. 
 
 ```{r,echo=FALSE, results="asis", message=FALSE}
 kable(t(rf.model.CM.validation$overall),format = "pandoc",digits=3,caption="Metrix for validation",align = "l") 
@@ -373,20 +363,20 @@ kable(rf.model.CM.validation$table,format = "pandoc",digits=3, caption = "Confus
 ### Importance of variables
 
 Importance of variables for classification using random forest.
-We'll present them graphically. And show only 20 important vars.
+They are presented here graphically. And show only 10 important variables.
 
 ```{r,echo=FALSE}
-varImpPlot(rf.model,sort = TRUE,n.var = 20, main = "variable importance")
+varImpPlot(rf.model,sort = TRUE,n.var = 10, main = "variable importance")
 ```
 
 ### Random forest conclusions
 
-Random forest is much more better for predicting and out comes the linear models.
+Random forest is much more better for predicting and outcomes the linear models. It predicts data with less than 0.01 misclassification error and for this data it is very powerfull.
 
 ### Boost model
 
-Another non-linear model. We'll see how it fits
-For this model tunning parameters here is n.trees = 500.
+Another non-linear model. This report will try to fit it.
+For this model tunning parameters here is n.trees = 500, and shrinkage = 0.01.
 
 Here is model and predictions for that method.
 ```{r,cache=TRUE,warning=FALSE}
@@ -480,18 +470,27 @@ kable(boost.model.CM.validation$table,format = "pandoc",digits=3, caption = "Con
 
 ### Boost inference
 
-So we have here inference, which variables are mostly influencial
+Here 10 most inferencial variables are shown.
 ```{r,echo=FALSE, results="asis", message=FALSE}
 boost.most.influencial <-  summary.gbm(boost.model,plotit=FALSE)
-kable(head(boost.most.influencial,20),
+kable(head(boost.most.influencial,10),
       format = "pandoc",
       digits=3, 
       caption = "Confusion matrix",
       row.names = FALSE,align = "l")
 ```
 
+Boost methos performs worse than Random forest. Acctually I managed to perform the same accuracy like random forest with n.tree option = 2000, but training process took long time. So for this data random forest model outperforms boost model. 
+
+
+
 ## Conclusion 
 
-This study tried to show various mashine learning methods. It looks like, that for this data non linear models are much competitive than linear. Also it can be extend with more models not covered in this study like Regularized Discriminant Analysis or neural network. 
-For this data this study recomends using Random forest because train time is much better than Boost.
+This study tried to show various mashine learning methods. It looks like, that for this data non linear models are much competitive than linear. Also it can be extend with more models not covered in this study like Regularized Discriminant Analysis or Neural Network.  
+For this data this study recomends using Random forest. Because trainging it is fast and performs outstanding results.  
+Boost model goes into second place because it is accurate, but training speed is low.  
+The third place goes to QDA model.  
+The last is lda model. But this study showed that extending variables (to polynomial model) good results can be achieved.  
+
+For every model this study achieved more than 92% accuracy. This is very good result, because we started with LDA which showed only 70 accuracy.  
 
